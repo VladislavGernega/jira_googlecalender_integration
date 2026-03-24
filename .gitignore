@@ -28,3 +28,4 @@ media/
 # Superpowers
 .superpowers/
 .claude/
+celerybeat-schedule

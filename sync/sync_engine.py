@@ -207,6 +207,12 @@ class SyncEngine:
 
     def get_or_create_tag(self, tag_name: str) -> Tag:
         """Get existing tag or create new one with auto-assigned color."""
+        # Case-insensitive lookup first
+        tag = Tag.objects.filter(name__iexact=tag_name).first()
+        if tag:
+            return tag
+
+        # Create new tag if not found
         tag, created = Tag.objects.get_or_create(
             name=tag_name,
             defaults={
@@ -233,6 +239,12 @@ class SyncEngine:
             tag = self.get_or_create_tag(fields['tag'])
             color_id = tag.google_color_id
 
+        # Override color based on priority (Medium keeps tag's default color)
+        if fields['priority'] in ('High', 'Highest'):
+            color_id = 11  # Red
+        elif fields['priority'] in ('Low', 'Lowest'):
+            color_id = 9   # Blue
+
         jira_base_url = self.jira_client.base_url
         issue_url = f"{jira_base_url}/browse/{fields['key']}"
 
@@ -250,7 +262,8 @@ class SyncEngine:
                 calendar_id=user.google_calendar_id or 'primary',
                 event_id=synced_issue.google_event_id,
                 summary=title,
-                due_date=due_date
+                due_date=due_date,
+                color_id=color_id
             )
             action = 'updated'
         else:
@@ -271,7 +284,8 @@ class SyncEngine:
                     calendar_id=user.google_calendar_id or 'primary',
                     event_id=synced_issue.google_event_id,
                     summary=title,
-                    due_date=due_date
+                    due_date=due_date,
+                    color_id=color_id
                 )
                 action = 'updated'
             else:
@@ -343,8 +357,8 @@ class SyncEngine:
         if fields['tag']:
             jira_updates['labels'] = [fields['tag']]
 
-        if fields.get('priority'):
-            jira_updates['priority'] = {'name': fields['priority']}
+        # Note: Priority is NOT synced from Google Calendar to Jira
+        # Jira is the source of truth for priority
 
         if jira_updates:
             self.jira_client.update_issue(synced_issue.jira_issue_key, jira_updates)

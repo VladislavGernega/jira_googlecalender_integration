@@ -120,6 +120,23 @@ class SyncEngine:
         # Extract assignee info
         assignee = fields.get('assignee') or {}
 
+        # Extract other assignees from custom field
+        # Look for common custom field patterns for "Other Assignees"
+        other_assignees = []
+        for field_key, field_value in fields.items():
+            if field_key.startswith('customfield_') and isinstance(field_value, list):
+                # Check if it's a list of users (has accountId)
+                if field_value and isinstance(field_value[0], dict) and 'accountId' in field_value[0]:
+                    other_assignees = [
+                        {
+                            'id': u.get('accountId'),
+                            'name': u.get('displayName', ''),
+                            'email': u.get('emailAddress', '')
+                        }
+                        for u in field_value
+                    ]
+                    break  # Found the user picker field
+
         # Get issue type for color coding
         issue_type = fields.get('issuetype', {}).get('name', '')
 
@@ -140,6 +157,7 @@ class SyncEngine:
             'assignee_id': assignee.get('accountId'),
             'assignee_name': assignee.get('displayName', ''),
             'assignee_email': assignee.get('emailAddress', ''),
+            'other_assignees': other_assignees,
             'updated': fields.get('updated'),
             'project_key': issue.get('key', '').split('-')[0]
         }

@@ -97,33 +97,31 @@ def run_sync(self) -> str:
         logger.exception(f"Sync task failed: {e}")
         raise self.retry(exc=e, countdown=10)
 
-def process_jira_issue(
-    engine: SyncEngine,
-    issue: Dict[str, Any],
-    stats: Dict[str, int]
-) -> None:
-    """Process a single Jira issue for sync."""
-    fields = engine.extract_jira_fields(issue)
-
-    if not fields['assignee_id']:
-        return  # No assignee, skip
-
-    # Find user - try email first, then Jira account ID
+def find_user_by_jira_info(email: str, account_id: str) -> 'JiraUser':
+    """Find a JiraUser by email or account ID."""
     user = None
-    if fields['assignee_email']:
-        user = JiraUser.objects.filter(email=fields['assignee_email'], is_active=True).first()
+    if email:
+        user = JiraUser.objects.filter(email=email, is_active=True).first()
         # Auto-populate Jira account ID if found by email
-        if user and fields['assignee_id'] and user.jira_account_id.startswith('pending_'):
-            user.jira_account_id = fields['assignee_id']
+        if user and account_id and user.jira_account_id.startswith('pending_'):
+            user.jira_account_id = account_id
             user.save()
             logger.info(f"Auto-populated Jira account ID for {user.email}")
 
-    if not user and fields['assignee_id']:
-        user = JiraUser.objects.filter(jira_account_id=fields['assignee_id'], is_active=True).first()
+    if not user and account_id:
+        user = JiraUser.objects.filter(jira_account_id=account_id, is_active=True).first()
 
-    if not user:
-        return  # User not set up for sync
+    return user
 
+
+def sync_issue_to_user(
+    engine: SyncEngine,
+    issue: Dict[str, Any],
+    fields: Dict[str, Any],
+    user: 'JiraUser',
+    stats: Dict[str, int]
+) -> None:
+    """Sync a single issue to a single user's calendar."""
     if not user.google_credentials_encrypted:
         return  # No Google credentials
 
@@ -137,7 +135,7 @@ def process_jira_issue(
     if fields['status'].lower() == 'done':
         if synced_issue and synced_issue.sync_enabled:
             engine.handle_deletion(synced_issue, source='jira')
-            logger.info(f"Deleted calendar event for completed task {fields['key']}")
+            logger.info(f"Deleted calendar event for completed task {fields['key']} for {user.email}")
         return
 
     # If synced_issue exists but was disabled (e.g., task was Done and reopened),
@@ -149,6 +147,45 @@ def process_jira_issue(
 
     engine.sync_jira_to_gcal(user, issue, synced_issue)
     stats['jira_to_gcal'] += 1
+
+
+def process_jira_issue(
+    engine: SyncEngine,
+    issue: Dict[str, Any],
+    stats: Dict[str, int]
+) -> None:
+    """Process a single Jira issue for sync."""
+    fields = engine.extract_jira_fields(issue)
+
+    # Build list of all assignees (primary + others)
+    all_assignees = []
+
+    # Add primary assignee
+    if fields['assignee_id']:
+        all_assignees.append({
+            'id': fields['assignee_id'],
+            'email': fields['assignee_email'],
+            'name': fields['assignee_name']
+        })
+
+    # Add other assignees from custom field
+    for other in fields.get('other_assignees', []):
+        # Avoid duplicates
+        if other['id'] and other['id'] not in [a['id'] for a in all_assignees]:
+            all_assignees.append(other)
+
+    if not all_assignees:
+        return  # No assignees, skip
+
+    # Sync to each assignee's calendar
+    for assignee_info in all_assignees:
+        user = find_user_by_jira_info(assignee_info.get('email', ''), assignee_info.get('id', ''))
+        if user:
+            try:
+                sync_issue_to_user(engine, issue, fields, user, stats)
+            except Exception as e:
+                logger.error(f"Error syncing {fields['key']} to {user.email}: {e}")
+                stats['errors'] += 1
 
 def process_gcal_changes(
     engine: SyncEngine,

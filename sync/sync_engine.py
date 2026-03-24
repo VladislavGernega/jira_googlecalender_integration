@@ -2,7 +2,7 @@
 import json
 import re
 from datetime import datetime
-from typing import Dict, Any, Optional, List, Callable
+from typing import Dict, Any, Optional, List, Callable, Tuple
 from django.utils import timezone
 
 from .models import JiraUser, SyncedIssue, SyncConfig, SyncHistory, Tag, Conflict
@@ -15,6 +15,16 @@ from .conflict_handler import ConflictHandler
 class SyncEngine:
     """Orchestrates bidirectional sync between Jira and Google Calendar."""
 
+    # Regex patterns for parsing time from summary
+    TIME_PATTERNS = [
+        # "2:30pm", "2:30 pm", "2:30PM", "2:30 PM"
+        r'(\d{1,2}):(\d{2})\s*(am|pm|AM|PM)',
+        # "2pm", "2 pm", "2PM", "2 PM"
+        r'(\d{1,2})\s*(am|pm|AM|PM)',
+        # "14:00", "14:30" (24-hour format)
+        r'(\d{1,2}):(\d{2})(?!\s*[ap])',
+    ]
+
     def __init__(
         self,
         jira_client: JiraClient,
@@ -25,6 +35,65 @@ class SyncEngine:
         self.tag_parser = TagParser()
         self.change_detector = ChangeDetector()
         self.conflict_handler = ConflictHandler(jira_client)
+
+    def parse_time_from_summary(self, summary: str) -> Tuple[int, int]:
+        """
+        Parse time from issue summary.
+        Returns (hour, minute) tuple. Defaults to (8, 0) if no time found.
+
+        Supports formats:
+        - "2pm", "2:30pm", "2 pm", "2:30 pm"
+        - "14:00", "14:30" (24-hour)
+        - "2:00 PM", "11:30 AM"
+        - "at 5", "by 3" (bare numbers, assumes PM for 1-7)
+        """
+        # Pattern 1: "2:30pm" or "2:30 pm"
+        match = re.search(r'(\d{1,2}):(\d{2})\s*(am|pm)', summary, re.IGNORECASE)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            period = match.group(3).lower()
+            if period == 'pm' and hour != 12:
+                hour += 12
+            elif period == 'am' and hour == 12:
+                hour = 0
+            return (hour, minute)
+
+        # Pattern 2: "2pm" or "2 pm" (no minutes)
+        match = re.search(r'(\d{1,2})\s*(am|pm)', summary, re.IGNORECASE)
+        if match:
+            hour = int(match.group(1))
+            period = match.group(2).lower()
+            if period == 'pm' and hour != 12:
+                hour += 12
+            elif period == 'am' and hour == 12:
+                hour = 0
+            return (hour, 0)
+
+        # Pattern 3: "14:00" (24-hour format, but not followed by am/pm)
+        match = re.search(r'(\d{1,2}):(\d{2})(?!\s*[ap]m)', summary, re.IGNORECASE)
+        if match:
+            hour = int(match.group(1))
+            minute = int(match.group(2))
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                # If hour is 1-7 and no am/pm specified, assume PM (business hours)
+                if 1 <= hour <= 7:
+                    hour += 12
+                return (hour, minute)
+
+        # Pattern 4: Bare number at end like "by 5", "at 3", or just "task 5"
+        # Look for standalone number (1-12) near end of summary
+        match = re.search(r'(?:at|by|@)?\s*(\d{1,2})(?:\s*$|\s+(?:today|tomorrow|eod|end))', summary, re.IGNORECASE)
+        if match:
+            hour = int(match.group(1))
+            if 1 <= hour <= 12:
+                # Assume PM for 1-7, AM for 8-12 (business hours heuristic)
+                if 1 <= hour <= 7:
+                    hour += 12
+                return (hour, 0)
+
+        # Default to 8:00 AM if no time found
+        return (8, 0)
 
     def extract_jira_fields(self, issue: Dict[str, Any]) -> Dict[str, Any]:
         """Extract relevant fields from Jira issue."""
@@ -95,11 +164,19 @@ class SyncEngine:
             except (ValueError, IndexError):
                 pass
 
-        # Extract description (without metadata)
+        # Extract description and metadata
         full_desc = event.get('description', '')
         # Find content between the separator lines
         parts = full_desc.split('─' * 40)
         description = parts[1].strip() if len(parts) > 2 else ''
+
+        # Parse priority from metadata section (first part before separator)
+        priority = None
+        if parts:
+            metadata = parts[0]
+            priority_match = re.search(r'Priority:\s*(\w+)', metadata)
+            if priority_match:
+                priority = priority_match.group(1)
 
         return {
             'event_id': event.get('id'),
@@ -108,6 +185,7 @@ class SyncEngine:
             'issue_key': issue_key,
             'due_date': due_date,
             'description': description,
+            'priority': priority,
             'updated': event.get('updated')
         }
 
@@ -158,7 +236,10 @@ class SyncEngine:
         jira_base_url = self.jira_client.base_url
         issue_url = f"{jira_base_url}/browse/{fields['key']}"
 
+        # Parse time from summary, default to 8:00 AM
+        hour, minute = self.parse_time_from_summary(fields['summary'])
         due_date = datetime.strptime(fields['due_date'], '%Y-%m-%d')
+        due_date = due_date.replace(hour=hour, minute=minute)
 
         if synced_issue:
             # Update existing event
@@ -173,28 +254,59 @@ class SyncEngine:
             )
             action = 'updated'
         else:
-            # Create new event
-            event_id = gcal_client.create_event(
-                calendar_id=user.google_calendar_id or 'primary',
-                summary=fields['summary'],
-                due_date=due_date,
-                description=fields['description'],
-                tag=fields['tag'],
-                issue_key=fields['key'],
-                issue_url=issue_url,
-                color_id=color_id,
-                status=fields['status'],
-                priority=fields['priority'],
-                assignee=fields['assignee_name']
-            )
-
-            synced_issue = SyncedIssue.objects.create(
+            # Double-check no existing sync record (race condition prevention)
+            existing = SyncedIssue.objects.filter(
                 jira_issue_key=fields['key'],
-                jira_issue_id=fields['id'],
-                google_event_id=event_id,
-                user=user
-            )
-            action = 'created'
+                user=user,
+                sync_enabled=True
+            ).first()
+
+            if existing:
+                # Another sync cycle already created it, just update
+                synced_issue = existing
+                title = self.tag_parser.format_title(
+                    fields['tag'], fields['summary'], fields['key']
+                )
+                gcal_client.update_event(
+                    calendar_id=user.google_calendar_id or 'primary',
+                    event_id=synced_issue.google_event_id,
+                    summary=title,
+                    due_date=due_date
+                )
+                action = 'updated'
+            else:
+                # Create new event
+                event_id = gcal_client.create_event(
+                    calendar_id=user.google_calendar_id or 'primary',
+                    summary=fields['summary'],
+                    due_date=due_date,
+                    description=fields['description'],
+                    tag=fields['tag'],
+                    issue_key=fields['key'],
+                    issue_url=issue_url,
+                    color_id=color_id,
+                    status=fields['status'],
+                    priority=fields['priority'],
+                    assignee=fields['assignee_name']
+                )
+
+                # Use get_or_create to prevent race condition duplicates
+                synced_issue, created = SyncedIssue.objects.get_or_create(
+                    jira_issue_key=fields['key'],
+                    user=user,
+                    defaults={
+                        'jira_issue_id': fields['id'],
+                        'google_event_id': event_id,
+                        'sync_enabled': True
+                    }
+                )
+
+                if not created:
+                    # Record already existed (race condition), update the event_id
+                    synced_issue.google_event_id = event_id
+                    synced_issue.sync_enabled = True
+
+                action = 'created'
 
         # Update checksums
         synced_issue.field_checksums = self.change_detector.build_checksums(fields)
@@ -230,6 +342,9 @@ class SyncEngine:
 
         if fields['tag']:
             jira_updates['labels'] = [fields['tag']]
+
+        if fields.get('priority'):
+            jira_updates['priority'] = {'name': fields['priority']}
 
         if jira_updates:
             self.jira_client.update_issue(synced_issue.jira_issue_key, jira_updates)

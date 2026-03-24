@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Report | TruckTech</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: #fafafa;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+            padding: 40px 0 80px;
+            color: white;
+        }
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+        .header p {
+            opacity: 0.8;
+            font-size: 15px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: -50px auto 40px;
+            padding: 0 24px;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+            overflow: hidden;
+        }
+        .filters {
+            padding: 24px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: flex-end;
+            border-bottom: 1px solid #eef0f2;
+        }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 140px;
+        }
+        .filter-group.wide {
+            min-width: 180px;
+        }
+        .filter-group label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .filter-group input, .filter-group select {
+            padding: 10px 14px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            background: #f8fafc;
+            transition: all 0.2s;
+            width: 100%;
+        }
+        .filter-group input:focus, .filter-group select:focus {
+            outline: none;
+            border-color: #2d5a87;
+            background: white;
+        }
+        .filter-group button {
+            padding: 10px 24px;
+            background: #2d5a87;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-family: inherit;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+        .filter-group button:hover {
+            background: #1e3a5f;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 1px;
+            background: #eef0f2;
+        }
+        .stat-item {
+            background: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-item .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1e293b;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        .stat-item .label {
+            font-size: 12px;
+            color: #64748b;
+            font-weight: 500;
+        }
+        .stat-item.success .value { color: #059669; }
+        .stat-item.danger .value { color: #dc2626; }
+        .stat-item.info .value { color: #2d5a87; }
+        .stat-item.warning .value { color: #d97706; }
+        .stat-item.neutral .value { color: #64748b; }
+        .table-wrapper {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background: #f8fafc;
+            padding: 14px 16px;
+            text-align: left;
+            font-size: 11px;
+            font-weight: 600;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid #eef0f2;
+            white-space: nowrap;
+        }
+        td {
+            padding: 14px 16px;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 14px;
+            color: #334155;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        tr:hover td {
+            background: #f8fafc;
+        }
+        .task-link {
+            color: #2d5a87;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .task-link:hover {
+            text-decoration: underline;
+        }
+        .type-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .type-badge.task { background: #dbeafe; color: #1d4ed8; }
+        .type-badge.bug { background: #fee2e2; color: #dc2626; }
+        .type-badge.story { background: #dcfce7; color: #16a34a; }
+        .type-badge.epic { background: #f3e8ff; color: #9333ea; }
+        .type-badge.default { background: #f1f5f9; color: #475569; }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.done { background: #dcfce7; color: #166534; }
+        .status-badge.in-progress { background: #dbeafe; color: #1d4ed8; }
+        .status-badge.to-do { background: #f1f5f9; color: #475569; }
+        .priority-text {
+            font-size: 13px;
+        }
+        .priority-text.high { color: #dc2626; font-weight: 600; }
+        .priority-text.medium { color: #d97706; }
+        .priority-text.low { color: #059669; }
+        .completion-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .completion-pill.on-time {
+            background: #dcfce7;
+            color: #166534;
+        }
+        .completion-pill.late {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .completion-pill.pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+        .completion-pill::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        .date-cell {
+            white-space: nowrap;
+        }
+        .date-main {
+            font-weight: 500;
+        }
+        .date-sub {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }
+        .date-sub.early { color: #059669; }
+        .date-sub.late { color: #dc2626; }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #64748b;
+        }
+        .empty-state h3 {
+            font-size: 18px;
+            color: #334155;
+            margin-bottom: 8px;
+        }
+        .error-banner {
+            background: #fef2f2;
+            border-left: 4px solid #dc2626;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+            border-radius: 0 8px 8px 0;
+            color: #991b1b;
+            font-size: 14px;
+        }
+        .task-summary {
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-content">
+            <h1>Task Report</h1>
+            <p>Track team performance and task progress</p>
+        </div>
+    </div>
+
+    <div class="container">
+        {% if error %}
+        <div class="error-banner">
+            Unable to fetch data: {{ error }}
+        </div>
+        {% endif %}
+
+        <div class="card">
+            <form class="filters" method="GET">
+                <div class="filter-group">
+                    <label>Project</label>
+                    <input type="text" name="project" value="{{ project }}" placeholder="TT">
+                </div>
+                <div class="filter-group wide">
+                    <label>Assignee</label>
+                    <select name="assignee">
+                        <option value="">All Team Members</option>
+                        {% for user in available_users %}
+                        <option value="{{ user.name }}" {% if assignee_filter == user.name %}selected{% endif %}>{{ user.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Status</label>
+                    <select name="status">
+                        <option value="">All Statuses</option>
+                        {% for status in available_statuses %}
+                        <option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ status }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Time Period</label>
+                    <select name="days">
+                        <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 days</option>
+                        <option value="14" {% if days == 14 %}selected{% endif %}>Last 14 days</option>
+                        <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+                        <option value="60" {% if days == 60 %}selected{% endif %}>Last 60 days</option>
+                        <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+                        <option value="365" {% if days == 365 %}selected{% endif %}>Last year</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <button type="submit">Apply</button>
+                </div>
+            </form>
+
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="value">{{ total }}</div>
+                    <div class="label">Total Tasks</div>
+                </div>
+                {% for status, count in status_counts.items %}
+                <div class="stat-item {% if status == 'Done' %}success{% elif status == 'In Progress' %}info{% else %}neutral{% endif %}">
+                    <div class="value">{{ count }}</div>
+                    <div class="label">{{ status }}</div>
+                </div>
+                {% endfor %}
+                {% if on_time_count or late_count %}
+                <div class="stat-item success">
+                    <div class="value">{{ on_time_count }}</div>
+                    <div class="label">On Time</div>
+                </div>
+                <div class="stat-item danger">
+                    <div class="value">{{ late_count }}</div>
+                    <div class="label">Late</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="card">
+            {% if report_data %}
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Type</th>
+                            <th>Summary</th>
+                            <th>Assignee</th>
+                            <th>Status</th>
+                            <th>Priority</th>
+                            <th>Due Date</th>
+                            <th>Completed</th>
+                            <th>Deadline</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for task in report_data %}
+                        <tr>
+                            <td>
+                                <a href="{{ task.url }}" target="_blank" class="task-link">{{ task.key }}</a>
+                            </td>
+                            <td>
+                                <span class="type-badge {% if task.issue_type == 'Task' %}task{% elif task.issue_type == 'Bug' %}bug{% elif task.issue_type == 'Story' %}story{% elif task.issue_type == 'Epic' %}epic{% else %}default{% endif %}">
+                                    {{ task.issue_type }}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="task-summary" title="{{ task.summary }}">{{ task.summary }}</div>
+                            </td>
+                            <td>{{ task.assignee }}</td>
+                            <td>
+                                <span class="status-badge {% if task.status == 'Done' %}done{% elif task.status == 'In Progress' %}in-progress{% else %}to-do{% endif %}">
+                                    {{ task.status }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="priority-text {% if task.priority == 'Highest' or task.priority == 'High' %}high{% elif task.priority == 'Medium' %}medium{% elif task.priority == 'Low' or task.priority == 'Lowest' %}low{% endif %}">
+                                    {{ task.priority|default:"-" }}
+                                </span>
+                            </td>
+                            <td class="date-cell">
+                                {% if task.due_date %}
+                                <div class="date-main">{{ task.due_date|date:"M d, Y" }}</div>
+                                {% else %}
+                                <span style="color: #94a3b8;">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="date-cell">
+                                {% if task.resolution_date %}
+                                <div class="date-main">{{ task.resolution_date|date:"M d, Y" }}</div>
+                                {% if task.days_diff is not None %}
+                                <div class="date-sub {% if task.days_diff >= 0 %}early{% else %}late{% endif %}">
+                                    {% if task.days_diff > 0 %}
+                                        {{ task.days_diff }} day{{ task.days_diff|pluralize }} early
+                                    {% elif task.days_diff == 0 %}
+                                        On the day
+                                    {% else %}
+                                        {{ task.days_diff|slice:"1:" }} day{{ task.days_diff|slice:"1:"|pluralize }} late
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {% else %}
+                                <span style="color: #94a3b8;">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if task.status == 'Done' %}
+                                    {% if task.is_on_time is True %}
+                                    <span class="completion-pill on-time">On Time</span>
+                                    {% elif task.is_on_time is False %}
+                                    <span class="completion-pill late">Late</span>
+                                    {% else %}
+                                    <span style="color: #94a3b8;">-</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="completion-pill pending">Pending</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <h3>No tasks found</h3>
+                <p>Try adjusting your filters or check back later.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

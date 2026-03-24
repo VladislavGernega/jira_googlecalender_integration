@@ -88,6 +88,9 @@ def run_sync(self) -> str:
                 logger.error(f"Error processing Google Calendar for {user.email}: {e}")
                 sync_stats['errors'] += 1
 
+        # Check for deleted Jira issues and remove calendar events
+        check_deleted_issues(engine, jira_client, sync_stats)
+
         return f"Sync complete: {sync_stats}"
 
     except Exception as e:
@@ -102,24 +105,47 @@ def process_jira_issue(
     """Process a single Jira issue for sync."""
     fields = engine.extract_jira_fields(issue)
 
-    if not fields['assignee_email']:
+    if not fields['assignee_id']:
         return  # No assignee, skip
 
-    # Find user
-    try:
-        user = JiraUser.objects.get(email=fields['assignee_email'], is_active=True)
-    except JiraUser.DoesNotExist:
+    # Find user - try email first, then Jira account ID
+    user = None
+    if fields['assignee_email']:
+        user = JiraUser.objects.filter(email=fields['assignee_email'], is_active=True).first()
+        # Auto-populate Jira account ID if found by email
+        if user and fields['assignee_id'] and user.jira_account_id.startswith('pending_'):
+            user.jira_account_id = fields['assignee_id']
+            user.save()
+            logger.info(f"Auto-populated Jira account ID for {user.email}")
+
+    if not user and fields['assignee_id']:
+        user = JiraUser.objects.filter(jira_account_id=fields['assignee_id'], is_active=True).first()
+
+    if not user:
         return  # User not set up for sync
 
     if not user.google_credentials_encrypted:
         return  # No Google credentials
 
-    # Check for existing sync
+    # Check for existing sync (regardless of sync_enabled status to prevent duplicates)
     synced_issue = SyncedIssue.objects.filter(
         jira_issue_key=fields['key'],
-        user=user,
-        sync_enabled=True
+        user=user
     ).first()
+
+    # If task is Done, delete the calendar event (deadline no longer relevant)
+    if fields['status'].lower() == 'done':
+        if synced_issue and synced_issue.sync_enabled:
+            engine.handle_deletion(synced_issue, source='jira')
+            logger.info(f"Deleted calendar event for completed task {fields['key']}")
+        return
+
+    # If synced_issue exists but was disabled (e.g., task was Done and reopened),
+    # we need to re-enable it and create a new calendar event
+    if synced_issue and not synced_issue.sync_enabled:
+        # Delete the old disabled record and create fresh
+        synced_issue.delete()
+        synced_issue = None
 
     engine.sync_jira_to_gcal(user, issue, synced_issue)
     stats['jira_to_gcal'] += 1
@@ -196,3 +222,32 @@ def process_gcal_changes(
         except Exception as e:
             logger.error(f"Error processing calendar event {event.get('id')}: {e}")
             stats['errors'] += 1
+
+
+def check_deleted_issues(
+    engine: SyncEngine,
+    jira_client: JiraClient,
+    stats: Dict[str, int]
+) -> None:
+    """Check for deleted Jira issues and remove their calendar events."""
+    import requests
+
+    # Get all synced issues that are still enabled
+    synced_issues = SyncedIssue.objects.filter(sync_enabled=True)
+
+    for synced_issue in synced_issues:
+        try:
+            # Try to fetch the issue from Jira
+            jira_client.get_issue(synced_issue.jira_issue_key)
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                # Issue was deleted in Jira - delete calendar event
+                try:
+                    engine.handle_deletion(synced_issue, source='jira')
+                    logger.info(f"Deleted calendar event for removed Jira issue {synced_issue.jira_issue_key}")
+                except Exception as del_error:
+                    logger.error(f"Error deleting calendar event for {synced_issue.jira_issue_key}: {del_error}")
+                    stats['errors'] += 1
+        except Exception as e:
+            # Other errors - log but don't treat as deletion
+            logger.debug(f"Error checking issue {synced_issue.jira_issue_key}: {e}")

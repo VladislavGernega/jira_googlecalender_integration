@@ -41,13 +41,14 @@ class JiraClient:
 
         jql = " AND ".join(jql_parts)
 
-        url = f"{self.base_url}/rest/api/3/search"
-        params = {
+        # Use new Jira search API endpoint (POST with JSON body)
+        url = f"{self.base_url}/rest/api/3/search/jql"
+        data = {
             'jql': jql,
-            'fields': 'summary,duedate,assignee,status,priority,labels,description,updated'
+            'fields': ['summary', 'duedate', 'assignee', 'status', 'priority', 'labels', 'description', 'updated', 'issuetype']
         }
 
-        response = requests.get(url, headers=self._build_headers(), params=params)
+        response = requests.post(url, headers=self._build_headers(), json=data)
         response.raise_for_status()
         return response.json().get('issues', [])
 

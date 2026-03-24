@@ -7,10 +7,10 @@ app = Celery('jira_gcal_sync')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
-# Schedule sync task every 30 seconds
+# Schedule sync task every 10 seconds
 app.conf.beat_schedule = {
-    'sync-jira-gcal-every-30-seconds': {
+    'sync-jira-gcal-every-10-seconds': {
         'task': 'sync.tasks.run_sync',
-        'schedule': 30.0,
+        'schedule': 10.0,
     },
 }

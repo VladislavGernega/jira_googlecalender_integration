@@ -56,26 +56,26 @@ class GoogleCalendarClient:
 
         full_description = "\n".join(desc_parts)
 
-        # Event at 8:00 AM on due date, 30 min duration
-        start_time = due_date.replace(hour=8, minute=0, second=0, microsecond=0)
-        end_time = start_time + timedelta(minutes=30)
+        # Event ENDS at deadline time, 5 min duration (so it's a reminder before deadline)
+        end_time = due_date.replace(second=0, microsecond=0)
+        start_time = end_time - timedelta(minutes=5)
 
         event = {
             'summary': title,
             'description': full_description,
             'start': {
                 'dateTime': start_time.isoformat(),
-                'timeZone': 'UTC',
+                'timeZone': 'America/Chicago',
             },
             'end': {
                 'dateTime': end_time.isoformat(),
-                'timeZone': 'UTC',
+                'timeZone': 'America/Chicago',
             },
             'colorId': str(color_id),
             'reminders': {
                 'useDefault': False,
                 'overrides': [
-                    {'method': 'popup', 'minutes': 0},  # At event time (8 AM)
+                    {'method': 'popup', 'minutes': 0},  # At deadline time
                 ],
             },
         }
@@ -100,10 +100,11 @@ class GoogleCalendarClient:
             event['summary'] = summary
 
         if due_date is not None:
-            start_time = due_date.replace(hour=8, minute=0, second=0, microsecond=0)
-            end_time = start_time + timedelta(minutes=30)
-            event['start'] = {'dateTime': start_time.isoformat(), 'timeZone': 'UTC'}
-            event['end'] = {'dateTime': end_time.isoformat(), 'timeZone': 'UTC'}
+            # Event ENDS at deadline time, 5 min duration
+            end_time = due_date.replace(second=0, microsecond=0)
+            start_time = end_time - timedelta(minutes=5)
+            event['start'] = {'dateTime': start_time.isoformat(), 'timeZone': 'America/Chicago'}
+            event['end'] = {'dateTime': end_time.isoformat(), 'timeZone': 'America/Chicago'}
 
         if description is not None:
             event['description'] = description
@@ -127,7 +128,15 @@ class GoogleCalendarClient:
         since: datetime
     ) -> List[Dict[str, Any]]:
         """Get events updated since given time."""
-        updated_min = since.isoformat() + 'Z'
+        # Format datetime properly for Google API (RFC3339)
+        # Remove timezone info and add Z for UTC
+        if since.tzinfo is not None:
+            # Convert to UTC and remove tzinfo
+            from datetime import timezone
+            since_utc = since.astimezone(timezone.utc).replace(tzinfo=None)
+        else:
+            since_utc = since
+        updated_min = since_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
 
         result = self.service.events().list(
             calendarId=calendar_id,

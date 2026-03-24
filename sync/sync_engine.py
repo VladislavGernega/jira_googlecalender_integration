@@ -120,9 +120,11 @@ class SyncEngine:
         # Extract assignee info
         assignee = fields.get('assignee') or {}
 
-        # Get first label as tag
+        # Get issue type for color coding
+        issue_type = fields.get('issuetype', {}).get('name', '')
+
+        # Get labels (kept for reference but not used for colors)
         labels = fields.get('labels', [])
-        tag = labels[0] if labels else None
 
         return {
             'key': issue.get('key'),
@@ -132,7 +134,8 @@ class SyncEngine:
             'description': description,
             'status': fields.get('status', {}).get('name', ''),
             'priority': fields.get('priority', {}).get('name', ''),
-            'tag': tag,
+            'issue_type': issue_type,
+            'tag': issue_type,  # Use issue type as tag for calendar title/color
             'labels': labels,
             'assignee_id': assignee.get('accountId'),
             'assignee_name': assignee.get('displayName', ''),
@@ -354,8 +357,8 @@ class SyncEngine:
         if fields['due_date']:
             jira_updates['duedate'] = fields['due_date']
 
-        if fields['tag']:
-            jira_updates['labels'] = [fields['tag']]
+        # Note: Issue type (tag) is NOT synced from Google Calendar to Jira
+        # Issue types are set in Jira and control calendar colors
 
         # Note: Priority is NOT synced from Google Calendar to Jira
         # Jira is the source of truth for priority
